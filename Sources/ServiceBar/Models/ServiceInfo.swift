@@ -10,6 +10,9 @@ struct ServiceInfo: Identifiable, Equatable {
     let hasTTY: Bool
     let smartName: String
     let isDevTool: Bool
+    var cpuPercent: Double
+    var memoryMB: Int
+    var memoryPercent: Double
 
     init(
         processName: String,
@@ -20,7 +23,10 @@ struct ServiceInfo: Identifiable, Equatable {
         hasTTY: Bool = false,
         version: String? = nil,
         isDevTool: Bool = false,
-        smartName: String? = nil
+        smartName: String? = nil,
+        cpuPercent: Double = 0,
+        memoryMB: Int = 0,
+        memoryPercent: Double = 0
     ) {
         self.processName = processName
         self.pid = pid
@@ -30,6 +36,9 @@ struct ServiceInfo: Identifiable, Equatable {
         self.hasTTY = hasTTY
         self.id = "\(pid)-\(port)"
         self.isDevTool = isDevTool
+        self.cpuPercent = cpuPercent
+        self.memoryMB = memoryMB
+        self.memoryPercent = memoryPercent
         
         if let smartName = smartName {
             self.smartName = smartName

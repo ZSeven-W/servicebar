@@ -19,6 +19,26 @@ struct ServiceRowView: View {
         case pid, port, command
     }
 
+    private var cpuColor: Color {
+        if service.cpuPercent < 50 {
+            return .green
+        } else if service.cpuPercent < 80 {
+            return .yellow
+        } else {
+            return .red
+        }
+    }
+
+    private var memoryColor: Color {
+        if service.memoryMB < 256 {
+            return .green
+        } else if service.memoryMB < 512 {
+            return .yellow
+        } else {
+            return .red
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .center, spacing: 4) {
@@ -67,6 +87,11 @@ struct ServiceRowView: View {
                 }
 
                 Spacer()
+
+                // Resource usage display
+                if !isStopped {
+                    resourceDisplay
+                }
 
                 // Action buttons
                 HStack(spacing: 2) {
@@ -193,6 +218,31 @@ struct ServiceRowView: View {
                 .fill(.quaternary.opacity(0.5))
         )
         .opacity(isStopped ? 0.7 : 1.0)
+    }
+
+    @ViewBuilder
+    private var resourceDisplay: some View {
+        HStack(spacing: 8) {
+            // CPU display
+            HStack(spacing: 2) {
+                Text("CPU:")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                Text(String(format: "%.1f%%", service.cpuPercent))
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(cpuColor)
+            }
+
+            // Memory display
+            HStack(spacing: 2) {
+                Text("Mem:")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                Text("\(service.memoryMB)MB")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(memoryColor)
+            }
+        }
     }
 
     private func copyToClipboard(_ text: String, field: CopiedField) {

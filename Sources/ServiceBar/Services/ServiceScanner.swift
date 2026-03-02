@@ -3,8 +3,15 @@ import Foundation
 final class ServiceScanner: ObservableObject {
     @Published var services: [ServiceInfo] = []
     @Published var isScanning = false
+    @Published var sortOrder: SortOrder = .port
     private var lastScanTime: Date?
     private var autoRefreshTimer: Timer?
+
+    enum SortOrder: String, CaseIterable {
+        case port = "Port"
+        case cpu = "CPU"
+        case memory = "Memory"
+    }
 
     private let excludedProcesses: Set<String> = [
         "rapportd", "sharingd", "WiFiAgent", "airportd",
@@ -22,10 +29,21 @@ final class ServiceScanner: ObservableObject {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result = self?.runScan() ?? []
             DispatchQueue.main.async {
-                self?.services = result
+                self?.services = self?.sortServices(result) ?? result
                 self?.isScanning = false
                 self?.lastScanTime = Date()
             }
+        }
+    }
+
+    private func sortServices(_ services: [ServiceInfo]) -> [ServiceInfo] {
+        switch sortOrder {
+        case .port:
+            return services.sorted { $0.port < $1.port }
+        case .cpu:
+            return services.sorted { $0.cpuPercent > $1.cpuPercent }
+        case .memory:
+            return services.sorted { $0.memoryMB > $1.memoryMB }
         }
     }
 
@@ -125,30 +143,29 @@ final class ServiceScanner: ObservableObject {
         let lsofOutput = Self.shell("/usr/sbin/lsof", arguments: ["-iTCP", "-sTCP:LISTEN", "-n", "-P", "-F", "pcn"])
         
         // 2. Get ALL process info in one go to avoid spawning 'ps' hundreds of times
-        // -A: all processes, -o: specific columns
-        // pid, tty, command (command is last so it can contain spaces)
         let psOutput = Self.shell("/bin/ps", arguments: ["-Ax", "-o", "pid,tty,command"])
         let psMap = parsePsOutput(psOutput)
+
+        // 3. Get CPU and memory info for all processes
+        let resourceOutput = Self.shell("/bin/ps", arguments: ["-Ax", "-o", "pid,pcpu,rss"])
+        let resourceMap = parseResourceOutput(resourceOutput)
         
-        return parseLsofOutput(lsofOutput, psMap: psMap)
+        return parseLsofOutput(lsofOutput, psMap: psMap, resourceMap: resourceMap)
     }
 
     private func parsePsOutput(_ output: String) -> [Int32: (tty: String, command: String)] {
         var map: [Int32: (tty: String, command: String)] = [:]
         let lines = output.components(separatedBy: "\n")
         
-        for line in lines.dropFirst() { // Skip header
+        for line in lines.dropFirst() {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else { continue }
             
-            // Format: PID TTY COMMAND
-            // Example: "  612 ??   /usr/libexec/opendirectoryd"
             let components = trimmed.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
             guard components.count >= 3 else { continue }
             
             if let pid = Int32(components[0]) {
                 let tty = components[1]
-                // Join the rest as the command
                 let command = components[2...].joined(separator: " ")
                 map[pid] = (tty, command)
             }
@@ -156,7 +173,27 @@ final class ServiceScanner: ObservableObject {
         return map
     }
 
-    private func parseLsofOutput(_ output: String, psMap: [Int32: (tty: String, command: String)]) -> [ServiceInfo] {
+    private func parseResourceOutput(_ output: String) -> [Int32: (cpu: Double, rss: Int)] {
+        var map: [Int32: (cpu: Double, rss: Int)] = [:]
+        let lines = output.components(separatedBy: "\n")
+        
+        for line in lines.dropFirst() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+            
+            let components = trimmed.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+            guard components.count >= 3 else { continue }
+            
+            if let pid = Int32(components[0]),
+               let cpu = Double(components[1]),
+               let rss = Int(components[2]) {
+                map[pid] = (cpu, rss)
+            }
+        }
+        return map
+    }
+
+    private func parseLsofOutput(_ output: String, psMap: [Int32: (tty: String, command: String)], resourceMap: [Int32: (cpu: Double, rss: Int)]) -> [ServiceInfo] {
         var results: [ServiceInfo] = []
         var seenIds: Set<String> = []
 
@@ -189,6 +226,13 @@ final class ServiceScanner: ObservableObject {
                 let command = psInfo?.command ?? name
                 let hasTTY = (psInfo?.tty ?? "??") != "??"
 
+                // Get resource usage
+                let resource = resourceMap[pid]
+                let cpuPercent = resource?.cpu ?? 0
+                // RSS is in pages, convert to MB: pages * 4096 / 1024 / 1024 = MB
+                let rssPages = resource?.rss ?? 0
+                let memoryMB = (rssPages * 4096) / 1024 / 1024
+
                 // Detect system services
                 let isSystem = command.hasPrefix("/System/") ||
                                command.hasPrefix("/usr/libexec/") ||
@@ -216,8 +260,6 @@ final class ServiceScanner: ObservableObject {
                     }
                 }
 
-                // If process name looks like a version number (e.g. "2.1.49"),
-                // extract the actual executable name from the command path.
                 if smartName == name,
                    name.range(of: #"^\d+[\.\d]*$"#, options: .regularExpression) != nil {
                     let parts = command.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
@@ -241,7 +283,10 @@ final class ServiceScanner: ObservableObject {
                     hasTTY: hasTTY,
                     version: version,
                     isDevTool: isDevTool,
-                    smartName: smartName
+                    smartName: smartName,
+                    cpuPercent: cpuPercent,
+                    memoryMB: memoryMB,
+                    memoryPercent: 0
                 )
                 results.append(service)
             default:
@@ -331,14 +376,12 @@ final class ServiceScanner: ObservableObject {
             return ""
         }
 
-        // Kill the process if it exceeds the timeout (lsof can hang on some systems)
         let killTimer = DispatchWorkItem { [weak task] in
             guard let task = task, task.isRunning else { return }
             task.terminate()
         }
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: killTimer)
 
-        // Read pipe BEFORE waitUntilExit to avoid deadlock when output exceeds pipe buffer
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         task.waitUntilExit()
         killTimer.cancel()
