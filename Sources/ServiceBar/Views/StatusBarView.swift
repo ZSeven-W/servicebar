@@ -332,18 +332,14 @@ struct StatusBarView: View {
             .help(allExpanded ? "Collapse all" : "Expand all")
 
             Picker("Sort", selection: $scanner.sortOrder) {
-                ForEach(ServiceScanner.SortOrder.allCases, id: \.self) { order in
+                ForEach(ServiceSortOrder.allCases, id: \.self) { order in
                     Text(order.rawValue).tag(order)
                 }
             }
             .pickerStyle(.menu)
             .frame(width: 80)
             .onChange(of: scanner.sortOrder) { _ in
-                scanner.services = scanner.sortOrder == .port 
-                    ? scanner.services.sorted { $0.port < $1.port }
-                    : scanner.sortOrder == .cpu
-                        ? scanner.services.sorted { $0.cpuPercent > $1.cpuPercent }
-                        : scanner.services.sorted { $0.memoryMB > $1.memoryMB }
+                scanner.applySort()
             }
 
             RefreshButton(isScanning: scanner.isScanning) {
