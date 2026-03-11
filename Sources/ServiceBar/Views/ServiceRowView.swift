@@ -3,6 +3,8 @@ import SwiftUI
 struct ServiceRowView: View {
     let service: ServiceInfo
     var isStopped: Bool = false
+    var isStarting: Bool = false
+    var isStopping: Bool = false
     let onStop: () -> Void
     let onRestart: () -> Void
     let onHide: (() -> Void)?
@@ -14,6 +16,8 @@ struct ServiceRowView: View {
     @State private var isHoveringCommand = false
     @State private var hoverTimer: DispatchWorkItem?
     @State private var confirmingStop = false
+    @State private var rowIsStarting = false
+    @State private var rowIsStopping = false
 
     private enum CopiedField: Equatable {
         case pid, port, command
@@ -97,12 +101,20 @@ struct ServiceRowView: View {
                 HStack(spacing: 2) {
                     if isStopped {
                         Button { onStart?() } label: {
-                            Image(systemName: "play.fill")
-                                .font(.system(size: 10))
-                                .foregroundStyle(.green)
-                                .frame(width: 20, height: 20)
+                            if rowIsStarting {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .scaleEffect(0.7)
+                                    .frame(width: 20, height: 20)
+                            } else {
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.green)
+                                    .frame(width: 20, height: 20)
+                            }
                         }
                         .buttonStyle(.borderless)
+                        .disabled(rowIsStarting || rowIsStopping)
                         .help("Start service")
 
                         Button { onRemove?() } label: {
@@ -112,6 +124,7 @@ struct ServiceRowView: View {
                                 .frame(width: 20, height: 20)
                         }
                         .buttonStyle(.borderless)
+                        .disabled(rowIsStarting || rowIsStopping)
                         .help("Remove from list")
                     } else {
                         if let onHide = onHide {
@@ -122,6 +135,7 @@ struct ServiceRowView: View {
                                     .frame(width: 20, height: 20)
                             }
                             .buttonStyle(.borderless)
+                            .disabled(rowIsStarting || rowIsStopping)
                             .help(isHidden ? "Show this service" : "Hide this service")
                         }
 
@@ -131,9 +145,15 @@ struct ServiceRowView: View {
                                 .frame(width: 20, height: 20)
                         }
                         .buttonStyle(.borderless)
+                        .disabled(rowIsStarting || rowIsStopping)
                         .help("Restart service")
 
-                        if confirmingStop {
+                        if rowIsStopping {
+                            ProgressView()
+                                .controlSize(.small)
+                                .scaleEffect(0.7)
+                                .frame(width: 20, height: 20)
+                        } else if confirmingStop {
                             HStack(spacing: 2) {
                                 Button {
                                     confirmingStop = false
@@ -166,6 +186,7 @@ struct ServiceRowView: View {
                                     .frame(width: 20, height: 20)
                             }
                             .buttonStyle(.borderless)
+                            .disabled(rowIsStarting || rowIsStopping)
                             .help("Stop service")
                         }
                     }
@@ -218,6 +239,19 @@ struct ServiceRowView: View {
                 .fill(.quaternary.opacity(0.5))
         )
         .opacity(isStopped ? 0.7 : 1.0)
+        .onAppear {
+            rowIsStarting = isStarting
+            rowIsStopping = isStopping
+        }
+        .onChange(of: isStarting) { newValue in
+            rowIsStarting = newValue
+        }
+        .onChange(of: isStopping) { newValue in
+            rowIsStopping = newValue
+            if newValue {
+                confirmingStop = false
+            }
+        }
     }
 
     @ViewBuilder

@@ -16,6 +16,8 @@ private struct GroupedData {
 
 struct StatusBarView: View {
     @ObservedObject var scanner: ServiceScanner
+    @ObservedObject var mcpScanner: MCPScanner
+    @ObservedObject var mcpInstaller: MCPInstaller
     @ObservedObject private var hiddenManager = HiddenItemsManager.shared
     @AppStorage("PortFilterMin") private var portMin: Int = 0
     @AppStorage("PortFilterMax") private var portMax: Int = 0
@@ -23,36 +25,27 @@ struct StatusBarView: View {
     @State private var searchText: String = ""
     @State private var showHiddenUserItems = false
     @State private var showSystemServices = false
+    @State private var showDockerContainers = true
+    @State private var showMCPServers = false
     @State private var collapsedApps: Set<String> = []
     @State private var allExpanded = true
     @State private var groupOrder: [String] = []
     @State private var draggingGroup: String?
     @State private var collapsedBeforeDrag: Set<String>?
     @State private var stoppedServices: [String: ServiceInfo] = [:]
+    @State private var startingServiceIds: Set<String> = []
+    @State private var stoppingServiceIds: Set<String> = []
     @ObservedObject private var aliasManager = GroupAliasManager.shared
     @State private var selectedTagFilters: Set<GroupTag> = []
     @State private var showStartError = false
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 10)
-
-            Divider()
-
-            if scanner.services.isEmpty && !scanner.isScanning {
-                emptyState
+            if showMCPServers {
+                MCPManagerView(scanner: mcpScanner, installer: mcpInstaller)
             } else {
-                serviceList
+                mainContent
             }
-
-            Divider()
-
-            footer
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
         }
         .frame(width: 400)
         .frame(maxHeight: 600)
@@ -85,6 +78,31 @@ struct StatusBarView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text("The service could not be started. The original command may no longer be valid.")
+        }
+    }
+    
+    // MARK: - Main Content (Services Tab)
+    
+    private var mainContent: some View {
+        VStack(spacing: 0) {
+            header
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 10)
+
+            Divider()
+
+            if scanner.services.isEmpty && !scanner.isScanning && scanner.containers.isEmpty {
+                emptyState
+            } else {
+                serviceList
+            }
+
+            Divider()
+
+            footer
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
         }
     }
 
@@ -248,13 +266,25 @@ struct StatusBarView: View {
     private var header: some View {
         HStack(spacing: 8) {
             let total = scanner.services.count
+            let containerCount = scanner.containers.count
             HStack(spacing: 3) {
-                Image(systemName: total == 0 ? "bolt.slash.fill" : "bolt.fill")
+                Image(systemName: total == 0 && containerCount == 0 ? "bolt.slash.fill" : "bolt.fill")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(total == 0 ? Color.secondary : Color.green)
+                    .foregroundStyle(total == 0 && containerCount == 0 ? Color.secondary : Color.green)
                 Text("\(total)")
                     .font(.system(size: 16, weight: .bold).monospacedDigit())
-                    .foregroundStyle(total == 0 ? .secondary : .primary)
+                    .foregroundStyle(total == 0 && containerCount == 0 ? .secondary : .primary)
+                if containerCount > 0 {
+                    Text("|")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                    Image(systemName: "shippingbox.fill")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.blue)
+                    Text("\(containerCount)")
+                        .font(.system(size: 14, weight: .bold).monospacedDigit())
+                        .foregroundStyle(.primary)
+                }
             }
 
             // Search bar (always visible)
@@ -393,6 +423,52 @@ struct StatusBarView: View {
 
         return ScrollView {
             VStack(spacing: 0) {
+                // Docker Containers section
+                if !scanner.containers.isEmpty {
+                    Button {
+                        showDockerContainers.toggle()
+                    } label: {
+                        HStack {
+                            Image(systemName: "chevron.right")
+                                .rotationEffect(.degrees(showDockerContainers ? 90 : 0))
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(.secondary)
+                            Image(systemName: "shippingbox.fill")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.blue)
+                            Text("Containers")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("\(scanner.containers.count)")
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1)
+                                .background(Capsule().fill(Color.secondary.opacity(0.1)))
+                            Spacer()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.primary.opacity(0.03))
+
+                    if showDockerContainers {
+                        VStack(spacing: 2) {
+                            ForEach(scanner.containers) { container in
+                                ContainerRowView(
+                                    container: container,
+                                    onStart: { startContainer(container) },
+                                    onStop: { stopContainer(container) },
+                                    onRestart: { restartContainer(container) }
+                                )
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 2)
+                            }
+                        }
+                        .padding(.bottom, 8)
+                    }
+                }
+
                 // Visible groups — drag to reorder
                 ForEach(data.visible) { group in
                     AppGroupView(
@@ -402,6 +478,8 @@ struct StatusBarView: View {
                         isExpanded: !collapsedApps.contains(group.name),
                         isDragging: draggingGroup == group.name,
                         stoppedServiceIds: Set(stoppedServices.keys),
+                        startingServiceIds: startingServiceIds,
+                        stoppingServiceIds: stoppingServiceIds,
                         onToggleExpand: {
                             if collapsedApps.contains(group.name) {
                                 collapsedApps.remove(group.name)
@@ -459,6 +537,8 @@ struct StatusBarView: View {
                         ForEach(data.hidden) { service in
                             ServiceRowView(
                                 service: service,
+                                isStarting: startingServiceIds.contains(service.id),
+                                isStopping: stoppingServiceIds.contains(service.id),
                                 onStop: { stopService(service) },
                                 onRestart: { promptRestart(service) },
                                 onHide: {
@@ -486,6 +566,8 @@ struct StatusBarView: View {
                         ForEach(data.system) { service in
                             ServiceRowView(
                                 service: service,
+                                isStarting: startingServiceIds.contains(service.id),
+                                isStopping: stoppingServiceIds.contains(service.id),
                                 onStop: { stopService(service) },
                                 onRestart: { promptRestart(service) },
                                 onHide: nil
@@ -544,6 +626,24 @@ struct StatusBarView: View {
 
     private var footer: some View {
         HStack {
+            // MCP Servers toggle
+            Button {
+                showMCPServers.toggle()
+                if showMCPServers {
+                    mcpScanner.scan()
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: showMCPServers ? "puzzlepiece.extension.fill" : "puzzlepiece.extension")
+                        .font(.system(size: 11))
+                    Text(showMCPServers ? "Services" : "MCP")
+                        .font(.system(size: 11))
+                }
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(showMCPServers ? .purple : .secondary)
+            .help("Toggle MCP Servers")
+
             Button {
                 NotificationCenter.default.post(name: .openSettings, object: nil)
             } label: {
@@ -556,32 +656,44 @@ struct StatusBarView: View {
 
             Spacer()
 
-            Button("Quit ServiceBar") {
-                NSApplication.shared.terminate(nil)
+            if !showMCPServers {
+                Button("Quit ServiceBar") {
+                    NSApplication.shared.terminate(nil)
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .font(.system(size: 12))
             }
-            .buttonStyle(.borderless)
-            .foregroundStyle(.secondary)
-            .font(.system(size: 12))
         }
     }
 
     // MARK: - Actions
 
     private func stopService(_ service: ServiceInfo) {
+        if stoppingServiceIds.contains(service.id) { return }
+        stoppingServiceIds.insert(service.id)
         scanner.stopService(pid: service.pid) { success in
-            if success {
-                stoppedServices[service.id] = service
+            DispatchQueue.main.async {
+                self.stoppingServiceIds.remove(service.id)
+                if success {
+                    self.stoppedServices[service.id] = service
+                }
             }
         }
     }
 
     private func startStoppedService(_ service: ServiceInfo) {
+        if startingServiceIds.contains(service.id) { return }
+        startingServiceIds.insert(service.id)
         scanner.startService(command: service.command) { success in
-            if success {
-                stoppedServices.removeValue(forKey: service.id)
-                scanner.scan()
-            } else {
-                showStartError = true
+            DispatchQueue.main.async {
+                self.startingServiceIds.remove(service.id)
+                if success {
+                    self.stoppedServices.removeValue(forKey: service.id)
+                    self.scanner.scan()
+                } else {
+                    self.showStartError = true
+                }
             }
         }
     }
@@ -599,6 +711,20 @@ struct StatusBarView: View {
                 scanner.restartService(service) { _ in scanner.scan() }
             }
         )
+    }
+
+    // MARK: - Docker Container Actions
+
+    private func startContainer(_ container: DockerContainer) {
+        scanner.startContainer(container) { _ in }
+    }
+
+    private func stopContainer(_ container: DockerContainer) {
+        scanner.stopContainer(container) { _ in }
+    }
+
+    private func restartContainer(_ container: DockerContainer) {
+        scanner.restartContainer(container) { _ in }
     }
 }
 
@@ -645,6 +771,8 @@ struct AppGroupView: View {
     let isExpanded: Bool
     let isDragging: Bool
     var stoppedServiceIds: Set<String> = []
+    var startingServiceIds: Set<String> = []
+    var stoppingServiceIds: Set<String> = []
     let onToggleExpand: () -> Void
     let onHideApp: () -> Void
     let onHideService: (ServiceInfo) -> Void
@@ -761,6 +889,8 @@ struct AppGroupView: View {
                         ServiceRowView(
                             service: service,
                             isStopped: isStopped,
+                            isStarting: startingServiceIds.contains(service.id),
+                            isStopping: stoppingServiceIds.contains(service.id),
                             onStop: { onStop(service) },
                             onRestart: { onRestart(service) },
                             onHide: isStopped ? nil : { onHideService(service) },

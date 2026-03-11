@@ -18,67 +18,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private let scanner = ServiceScanner()
+    private let mcpScanner = MCPScanner()
+    private let mcpInstaller = MCPInstaller()
     private var eventMonitor: Any?
-    private var cancellables: Set<AnyCancellable> = []
+    private var cancellables = Set<AnyCancellable>()
     private var settingsWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSLog("[ServiceBar] applicationDidFinishLaunching started")
+        setupApplicationStyle()
+        setupPopover()
+        setupStatusItem()
+        setupObservers()
 
-        // Set app icon (from .app bundle's Resources or .icns)
+        NSLog("[ServiceBar] setup complete")
+        setupInitialScan()
+    }
+
+    private func setupApplicationStyle() {
         if let icon = NSImage(named: "AppIcon") {
             NSApp.applicationIconImage = icon
         }
-
-        // Hide dock icon
         NSApp.setActivationPolicy(.accessory)
+    }
 
-        // Setup popover
+    private func setupPopover() {
         popover = NSPopover()
         popover.contentSize = NSSize(width: 400, height: 500)
         popover.behavior = .transient
         popover.animates = true
         popover.contentViewController = NSHostingController(
-            rootView: StatusBarView(scanner: scanner)
+            rootView: StatusBarView(scanner: scanner, mcpScanner: mcpScanner, mcpInstaller: mcpInstaller)
         )
+    }
 
-        // Setup status bar item
+    private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-
         if let button = statusItem.button {
             button.title = "⚙ 0"
             button.action = #selector(togglePopover(_:))
             button.target = self
         }
-
-        // Update status bar badge when services change
         updateBadge()
+    }
+
+    private func setupObservers() {
         scanner.$services
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.updateBadge() }
             .store(in: &cancellables)
 
-        // Listen for icon style changes
         NotificationCenter.default.publisher(for: .iconStyleChanged)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.updateBadge() }
             .store(in: &cancellables)
 
-        // Listen for refresh interval changes
         NotificationCenter.default.publisher(for: .refreshIntervalChanged)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.restartAutoRefresh() }
             .store(in: &cancellables)
 
-        // Listen for settings open request
         NotificationCenter.default.publisher(for: Notification.Name.openSettings)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.openSettings() }
             .store(in: &cancellables)
+    }
 
-        NSLog("[ServiceBar] setup complete")
-
-        // Auto-scan on launch and start periodic refresh
+    private func setupInitialScan() {
         scanner.scan()
         restartAutoRefresh()
     }

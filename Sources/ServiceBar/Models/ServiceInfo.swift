@@ -13,6 +13,8 @@ struct ServiceInfo: Identifiable, Equatable {
     var cpuPercent: Double
     var memoryMB: Int
     var memoryPercent: Double
+    var isContainer: Bool
+    var containerId: String?
 
     init(
         processName: String,
@@ -26,7 +28,9 @@ struct ServiceInfo: Identifiable, Equatable {
         smartName: String? = nil,
         cpuPercent: Double = 0,
         memoryMB: Int = 0,
-        memoryPercent: Double = 0
+        memoryPercent: Double = 0,
+        isContainer: Bool = false,
+        containerId: String? = nil
     ) {
         self.processName = processName
         self.pid = pid
@@ -39,6 +43,8 @@ struct ServiceInfo: Identifiable, Equatable {
         self.cpuPercent = cpuPercent
         self.memoryMB = memoryMB
         self.memoryPercent = memoryPercent
+        self.isContainer = isContainer
+        self.containerId = containerId
         
         if let smartName = smartName {
             self.smartName = smartName
