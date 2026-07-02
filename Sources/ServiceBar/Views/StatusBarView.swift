@@ -42,7 +42,11 @@ struct StatusBarView: View {
     var body: some View {
         VStack(spacing: 0) {
             if showMCPServers {
-                MCPManagerView(scanner: mcpScanner, installer: mcpInstaller)
+                MCPManagerView(
+                    scanner: mcpScanner,
+                    installer: mcpInstaller,
+                    onClose: { showMCPServers = false }
+                )
             } else {
                 mainContent
             }

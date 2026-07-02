@@ -3,6 +3,7 @@ import SwiftUI
 struct MCPManagerView: View {
     @ObservedObject var scanner: MCPScanner
     @ObservedObject var installer: MCPInstaller
+    let onClose: () -> Void
     @State private var selectedAgentType: MCPAgentType = .claudeCode
     @State private var expandedAgents: Set<MCPAgentType> = Set(MCPAgentType.allCases)
     @State private var installingServerId: String?
@@ -35,6 +36,30 @@ struct MCPManagerView: View {
                 .buttonStyle(.borderless)
                 .disabled(scanner.isScanning)
                 .help("Refresh MCP servers")
+
+                Button {
+                    onClose()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text("Services")
+                            .font(.system(size: 11))
+                    }
+                }
+                .buttonStyle(.borderless)
+                .help("Back to services")
+
+                Button {
+                    onClose()
+                    NotificationCenter.default.post(name: .closePopover, object: nil)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .help("Close ServiceBar")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)

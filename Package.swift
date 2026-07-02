@@ -12,6 +12,10 @@ let package = Package(
             name: "ServiceBar",
             path: "Sources/ServiceBar",
             exclude: ["Assets.xcassets", "Resources"]
+        ),
+        .testTarget(
+            name: "ServiceBarTests",
+            dependencies: ["ServiceBar"]
         )
     ]
 )

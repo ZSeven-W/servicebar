@@ -82,6 +82,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.openSettings() }
             .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: Notification.Name.closePopover)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.closePopover() }
+            .store(in: &cancellables)
     }
 
     private func setupInitialScan() {
